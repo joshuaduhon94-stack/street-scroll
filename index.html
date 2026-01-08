@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Infinite Cartoon Street (Seamless)</title>
+  <title>Infinite Cartoon Street (Textured)</title>
   <style>
     html,body{margin:0;height:100%;background:#0b0d12;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
     .spacerTop,.spacerBottom{max-width:900px;margin:0 auto;padding:46px 18px;opacity:.92}
@@ -30,17 +30,17 @@
 <body>
 
   <div class="spacerTop">
-    <h1>Infinite Cartoon Street (Seamless)</h1>
-    <p>Scroll down. Seamless loop, spaced houses and lamps, wider grass, higher sky, stronger horizon perspective.</p>
+    <h1>Infinite Cartoon Street (Textured)</h1>
+    <p>Scroll down. Seamless loop, bigger houses, smaller street, wider textured grass, higher clouds, and textures everywhere.</p>
   </div>
 
   <section class="scrollSection" id="scrollSection">
     <div class="stage">
       <canvas id="c"></canvas>
       <div class="hud">
-        <div class="k">Seamless Loop • Clean Spacing • Mobile-first</div>
+        <div class="k">Seamless Loop • Textures • Mobile-first</div>
         <h2 class="t">Scroll to move forward</h2>
-        <p class="s">Next: swap drawn houses for AI PNG sprites for a premium cartoon look.</p>
+        <p class="s">Next: we can swap the procedural textures for AI sprites for “ultra” detail.</p>
       </div>
     </div>
   </section>
@@ -61,111 +61,245 @@
     canvas.width = Math.floor(canvas.clientWidth * dpr);
     canvas.height = Math.floor(canvas.clientHeight * dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    buildPatterns(); // rebuild textures at new size/DPR
   }
   window.addEventListener("resize", resize);
-  resize();
 
   // ========= Art-directed tuning =========
-  const FAR_Z = 5200;             // farther world -> tighter horizon depth
-  const NEAR_Z = 120;             // when objects pass near this, recycle
-  const SPAN_Z = FAR_Z;           // seamless loop span (exact repeat length)
+  const FAR_Z = 5600;
+  const NEAR_Z = 120;
+  const SPAN_Z = FAR_Z;
 
-  const SPEED = 1.85;             // forward speed
-  const CURVE = 0.00045;          // gentle road curve
-  const ROAD_W = 520;             // road half-width base
-  const HORIZON = 0.22;           // higher sky (smaller value = higher horizon line)
-  const CAMERA_Y = 170;           // camera height
+  const SPEED = 1.80;
+  const CURVE = 0.00042;
+  const ROAD_W = 380;             // smaller street (was 520)
+  const HORIZON = 0.18;           // higher sky
+  const CAMERA_Y = 175;
 
-  const GROUND_Y = 520;           // push "ground plane" lower -> grass fills bottom half
-  const SIDEWALK_W = 140;
-  const GRASS_W = 820;            // MUCH wider grass
-  const ROAD_TAPER = 0.86;        // stronger convergence (higher taper)
+  const GROUND_Y = 540;           // lower ground -> more grass on bottom
+  const SIDEWALK_W = 150;
+  const GRASS_W = 1400;           // MUCH wider grass to sides
+  const ROAD_TAPER = 0.90;        // tighter vanishing point
 
-  // Spacing controls (no clutter)
-  const HOUSE_COUNT = 18;
-  const HOUSE_Z_GAP = 340;        // bigger gaps = less clutter
-  const LAMP_COUNT  = 14;
-  const LAMP_Z_GAP  = 520;        // spaced out lamps
+  const HOUSE_COUNT = 16;
+  const HOUSE_Z_GAP = 380;
+  const LAMP_COUNT  = 12;
+  const LAMP_Z_GAP  = 600;
 
-  // ========= Math helpers =========
+  // Houses bigger
+  const HOUSE_BASE_SIZE = 330;    // bigger houses
+
+  // ========= Helpers =========
   const clamp = (n,a,b)=>Math.max(a,Math.min(b,n));
   const rand = (a,b)=>a+Math.random()*(b-a);
   const randi = (a,b)=>Math.floor(rand(a,b+1));
 
   function project(x, y, z){
-    // slightly narrower fov -> stronger depth feel
-    const fov = 380;
+    const fov = 360;
     const scale = fov / (fov + z);
     const cx = canvas.clientWidth * 0.5;
     const cy = canvas.clientHeight * HORIZON;
     return { sx: cx + x * scale, sy: cy + (y - CAMERA_Y) * scale, s: scale };
   }
-
   function roadCenterX(z, t){
-    // very smooth curve
-    return Math.sin((t * 0.0016) + z * CURVE) * 220;
+    return Math.sin((t * 0.0015) + z * CURVE) * 230;
   }
-
   function halfRoadAtZ(z){
-    // stronger taper with distance => tighter vanishing point
     const p = (z / FAR_Z);
     return ROAD_W * (1 - Math.pow(p, 0.78) * ROAD_TAPER);
   }
-
-  // Ground height function (slight rise in distance for nicer composition)
   function groundYAtZ(z){
-    // As z increases, ground rises a bit toward horizon
-    return GROUND_Y - (z / FAR_Z) * 55;
+    return GROUND_Y - (z / FAR_Z) * 65;
+  }
+  function wrapZ(z){
+    z = z % SPAN_Z;
+    if(z < 0) z += SPAN_Z;
+    return z;
   }
 
-  // ========= Sky / Clouds / Sun haze =========
-  const clouds = Array.from({length: 12}, () => ({
-    x: rand(-760, 760),
-    y: rand(-40, 170),
-    z: rand(900, FAR_Z),
-    w: rand(240, 580),
-    h: rand(70, 190),
-    speed: rand(0.15, 0.55),
+  // ========= Procedural texture patterns =========
+  let grassPattern = null;
+  let roadPattern = null;
+  let sidewalkPattern = null;
+  let shinglePattern = null;
+
+  function makePattern(drawFn, w, h){
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const g = c.getContext("2d");
+    drawFn(g, w, h);
+    return ctx.createPattern(c, "repeat");
+  }
+
+  function buildPatterns(){
+    // Grass texture: darker noise + blades
+    grassPattern = makePattern((g,w,h) => {
+      g.fillStyle = "#4fbf63";
+      g.fillRect(0,0,w,h);
+
+      // noise specks
+      for(let i=0;i<260;i++){
+        const x = Math.random()*w, y = Math.random()*h;
+        g.fillStyle = `rgba(0,0,0,${Math.random()*0.18})`;
+        g.fillRect(x,y,1,1);
+      }
+
+      // blade strokes
+      g.lineWidth = 1;
+      for(let i=0;i<120;i++){
+        const x = Math.random()*w, y = Math.random()*h;
+        const len = 6 + Math.random()*10;
+        g.strokeStyle = `rgba(20,70,30,${0.15 + Math.random()*0.25})`;
+        g.beginPath();
+        g.moveTo(x,y);
+        g.lineTo(x+ (Math.random()*2-1)*2, y-len);
+        g.stroke();
+      }
+
+      // brighter patches
+      for(let i=0;i<24;i++){
+        const x = Math.random()*w, y = Math.random()*h;
+        g.fillStyle = `rgba(120,255,160,${0.06 + Math.random()*0.08})`;
+        g.beginPath();
+        g.ellipse(x,y, 14+Math.random()*26, 10+Math.random()*22, 0, 0, Math.PI*2);
+        g.fill();
+      }
+    }, 220, 220);
+
+    // Road asphalt: dark base + speckle + subtle crack lines
+    roadPattern = makePattern((g,w,h)=>{
+      g.fillStyle = "#2a2f3c";
+      g.fillRect(0,0,w,h);
+      for(let i=0;i<420;i++){
+        const x=Math.random()*w,y=Math.random()*h;
+        const a = 0.05+Math.random()*0.18;
+        g.fillStyle = `rgba(255,255,255,${a*0.12})`;
+        g.fillRect(x,y,1,1);
+      }
+      g.strokeStyle = "rgba(0,0,0,0.18)";
+      for(let i=0;i<10;i++){
+        g.beginPath();
+        g.moveTo(Math.random()*w, Math.random()*h);
+        g.quadraticCurveTo(Math.random()*w, Math.random()*h, Math.random()*w, Math.random()*h);
+        g.stroke();
+      }
+    }, 180, 180);
+
+    // Sidewalk slabs
+    sidewalkPattern = makePattern((g,w,h)=>{
+      g.fillStyle = "#e0ddd6";
+      g.fillRect(0,0,w,h);
+      g.strokeStyle = "rgba(0,0,0,0.12)";
+      g.lineWidth = 2;
+      for(let x=0;x<w;x+=40){
+        g.beginPath(); g.moveTo(x,0); g.lineTo(x,h); g.stroke();
+      }
+      for(let y=0;y<h;y+=46){
+        g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke();
+      }
+      // mild noise
+      for(let i=0;i<220;i++){
+        g.fillStyle = `rgba(0,0,0,${Math.random()*0.08})`;
+        g.fillRect(Math.random()*w, Math.random()*h, 1, 1);
+      }
+    }, 240, 180);
+
+    // Roof shingles
+    shinglePattern = makePattern((g,w,h)=>{
+      g.fillStyle = "#ff6b6b";
+      g.fillRect(0,0,w,h);
+      g.strokeStyle = "rgba(0,0,0,0.22)";
+      g.lineWidth = 1;
+      for(let y=0;y<h;y+=10){
+        for(let x=0;x<w;x+=26){
+          g.beginPath();
+          g.moveTo(x, y);
+          g.lineTo(x+26, y);
+          g.stroke();
+        }
+      }
+      // staggered shingle seams
+      g.strokeStyle = "rgba(255,255,255,0.10)";
+      for(let y=5;y<h;y+=10){
+        for(let x=(y%20===5?13:0);x<w;x+=26){
+          g.beginPath();
+          g.moveTo(x, y);
+          g.lineTo(x+13, y);
+          g.stroke();
+        }
+      }
+    }, 260, 140);
+  }
+
+  // ========= Sky / Clouds (higher + textured) =========
+  const clouds = Array.from({length: 14}, () => ({
+    x: rand(-900, 900),
+    y: rand(-210, 40),           // HIGHER (negative means near top)
+    z: rand(1000, FAR_Z),
+    w: rand(260, 620),
+    h: rand(80, 210),
+    speed: rand(0.12, 0.55),
+    shade: rand(0.88, 0.98),
   }));
+
+  function drawCloud(p, ww, hh, shade){
+    // multi-blob + subtle shading “texture”
+    ctx.save();
+    ctx.fillStyle = `rgba(255,255,255,${shade})`;
+    ctx.beginPath();
+    ctx.ellipse(p.sx, p.sy, ww*0.44, hh*0.34, 0, 0, Math.PI*2);
+    ctx.ellipse(p.sx - ww*0.28, p.sy + hh*0.06, ww*0.34, hh*0.26, 0, 0, Math.PI*2);
+    ctx.ellipse(p.sx + ww*0.30, p.sy + hh*0.09, ww*0.38, hh*0.28, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // soft underside shade
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = "rgba(120,150,190,1)";
+    ctx.beginPath();
+    ctx.ellipse(p.sx, p.sy + hh*0.18, ww*0.40, hh*0.22, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // micro texture dots
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = "rgba(0,0,0,1)";
+    for(let i=0;i<18;i++){
+      ctx.beginPath();
+      ctx.ellipse(p.sx + (Math.random()*2-1)*ww*0.22, p.sy + (Math.random()*2-1)*hh*0.18, 2, 2, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
 
   function drawSky(t){
     const w = canvas.clientWidth, h = canvas.clientHeight;
 
-    // soft, pleasing sky gradient
     const g = ctx.createLinearGradient(0,0,0,h);
-    g.addColorStop(0, "#78b9ff");
-    g.addColorStop(0.35, "#bfe5ff");
-    g.addColorStop(0.72, "#eaf6ff");
-    g.addColorStop(1, "#f7fbff");
+    g.addColorStop(0, "#6fb4ff");
+    g.addColorStop(0.40, "#bfe6ff");
+    g.addColorStop(0.78, "#f0fbff");
+    g.addColorStop(1, "#ffffff");
     ctx.fillStyle = g;
     ctx.fillRect(0,0,w,h);
 
-    // subtle sun haze (top right)
-    const sun = ctx.createRadialGradient(w*0.78, h*0.18, 20, w*0.78, h*0.18, Math.max(w,h)*0.55);
-    sun.addColorStop(0, "rgba(255,250,220,0.75)");
+    // sun haze
+    const sun = ctx.createRadialGradient(w*0.78, h*0.14, 20, w*0.78, h*0.14, Math.max(w,h)*0.55);
+    sun.addColorStop(0, "rgba(255,250,220,0.78)");
     sun.addColorStop(1, "rgba(255,250,220,0)");
     ctx.fillStyle = sun;
     ctx.fillRect(0,0,w,h);
 
     // clouds
-    ctx.save();
-    ctx.fillStyle = "#ffffff";
     for(const c of clouds){
-      const drift = Math.sin((t*0.001*c.speed) + c.z*0.0018) * 55;
+      const drift = Math.sin((t*0.001*c.speed) + c.z*0.0018) * 65;
       const p = project(c.x + drift, c.y, c.z);
       const ww = c.w * p.s;
       const hh = c.h * p.s;
-
-      ctx.beginPath();
-      ctx.ellipse(p.sx, p.sy, ww*0.44, hh*0.34, 0, 0, Math.PI*2);
-      ctx.ellipse(p.sx - ww*0.26, p.sy + hh*0.06, ww*0.34, hh*0.26, 0, 0, Math.PI*2);
-      ctx.ellipse(p.sx + ww*0.28, p.sy + hh*0.08, ww*0.38, hh*0.28, 0, 0, Math.PI*2);
-      ctx.fill();
+      drawCloud(p, ww, hh, c.shade);
     }
-    ctx.restore();
   }
 
-  // ========= Bands (grass, sidewalk, road) =========
+  // ========= Bands =========
   function polygonBand(getLeftRightAtZ, zMax, steps, fillStyle){
     ctx.beginPath();
     for(let i=0;i<=steps;i++){
@@ -187,55 +321,41 @@
   }
 
   function drawWorldBands(t){
-    const steps = 90;
+    const steps = 96;
 
-    // Grass (outer) – richer color
+    // Grass (textured)
     polygonBand((z) => {
       const cx = roadCenterX(z, t);
       const halfRoad = halfRoadAtZ(z);
-      const y = groundYAtZ(z) + 6;
+      const y = groundYAtZ(z) + 8;
       const lx = cx - (halfRoad + SIDEWALK_W + GRASS_W);
       const rx = cx + (halfRoad + SIDEWALK_W + GRASS_W);
       return { lx, rx, y };
-    }, FAR_Z, steps, "#4fbf63");
+    }, FAR_Z, steps, grassPattern || "#4fbf63");
 
-    // subtle grass texture lines
-    ctx.save();
-    ctx.globalAlpha = 0.10;
-    ctx.strokeStyle = "rgba(0,0,0,0.6)";
-    ctx.lineWidth = 1;
-    for(let i=0;i<24;i++){
-      const y = canvas.clientHeight*(0.55 + i*0.02);
-      ctx.beginPath();
-      ctx.moveTo(0,y);
-      ctx.lineTo(canvas.clientWidth,y);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // Sidewalk (slightly warm gray)
+    // Sidewalk (textured slabs)
     polygonBand((z) => {
       const cx = roadCenterX(z, t);
       const halfRoad = halfRoadAtZ(z);
-      const y = groundYAtZ(z) + 2;
+      const y = groundYAtZ(z) + 4;
       const lx = cx - (halfRoad + SIDEWALK_W);
       const rx = cx + (halfRoad + SIDEWALK_W);
       return { lx, rx, y };
-    }, FAR_Z, steps, "#e0ddd6");
+    }, FAR_Z, steps, sidewalkPattern || "#e0ddd6");
 
-    // Road
+    // Road (textured asphalt)
     polygonBand((z) => {
       const cx = roadCenterX(z, t);
       const halfRoad = halfRoadAtZ(z);
       const y = groundYAtZ(z);
       return { lx: cx - halfRoad, rx: cx + halfRoad, y };
-    }, FAR_Z, steps, "#2a2f3c");
+    }, FAR_Z, steps, roadPattern || "#2a2f3c");
 
     // center line
     ctx.save();
-    ctx.globalAlpha = 0.7;
-    ctx.strokeStyle = "rgba(255,255,255,0.85)";
-    ctx.lineWidth = 2.6;
+    ctx.globalAlpha = 0.65;
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 2.4;
     ctx.setLineDash([18, 22]);
     ctx.beginPath();
     for(let i=0;i<=steps;i++){
@@ -248,17 +368,17 @@
     ctx.stroke();
     ctx.restore();
 
-    // atmospheric haze near horizon (aesthetic x10)
+    // haze near horizon
     const w = canvas.clientWidth, h = canvas.clientHeight;
     const hz = h * HORIZON;
-    const haze = ctx.createLinearGradient(0, hz - 40, 0, hz + 260);
-    haze.addColorStop(0, "rgba(255,255,255,0.20)");
+    const haze = ctx.createLinearGradient(0, hz - 40, 0, hz + 320);
+    haze.addColorStop(0, "rgba(255,255,255,0.22)");
     haze.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = haze;
-    ctx.fillRect(0, hz - 40, w, 320);
+    ctx.fillRect(0, hz - 60, w, 380);
   }
 
-  // ========= House drawing (solid, varied) =========
+  // ========= House styling + details =========
   function roundRect(x,y,w,h,r){
     const rr = Math.min(r, w/2, h/2);
     ctx.beginPath();
@@ -271,79 +391,123 @@
   }
 
   function makeHouseStyle(){
-    // nicer, cohesive palette
-    const body = ["#ffd38a","#a7e7ff","#ffc0d3","#c7f2c7","#e6c8ff","#ffcfad","#fff2a8"];
-    const roof = ["#ff6b6b","#ff8fb3","#6b7bff","#2f3c55","#ff9b42","#3c6b4a","#5b3a2a"];
-    const trim = ["#ffffff","#2b2f3b","#fff1cc","#f7f7f7","#1b1f2a"];
+    const body = ["#ffd38a","#a7e7ff","#ffc0d3","#c7f2c7","#e6c8ff","#ffcfad","#fff2a8","#b7d1ff"];
+    const roof = ["#ff6b6b","#ff8fb3","#6b7bff","#2f3c55","#ff9b42","#3c6b4a","#5b3a2a","#8a4c2b"];
     return {
       body: body[randi(0, body.length-1)],
       roof: roof[randi(0, roof.length-1)],
-      trim: trim[randi(0, trim.length-1)],
-      win:  "#192234",
-      door: ["#7b4b2a","#2f3c55","#5a2a2a","#2a5a3b"][randi(0,3)],
+      trim: ["#ffffff","#2b2f3b","#fff1cc","#f7f7f7","#1b1f2a"][randi(0,4)],
+      win:  "#172033",
+      door: ["#7b4b2a","#2f3c55","#5a2a2a","#2a5a3b","#6b2a86"][randi(0,4)],
       floors: randi(1,2),
       roofType: randi(0,2),
-      wMul: rand(0.90, 1.20),
-      hMul: rand(0.90, 1.28),
+      wMul: rand(0.95, 1.22),
+      hMul: rand(0.95, 1.32),
       winCols: randi(1,2),
-      accent: ["#ffffff","#ffe9a6","#dff6ff","#ffd6e6"][randi(0,3)],
-      hasPorch: Math.random() < 0.55,
-      hasChimney: Math.random() < 0.50,
+      accent: ["#ffffff","#ffe9a6","#dff6ff","#ffd6e6","#d9ffd9"][randi(0,4)],
+      hasPorch: Math.random() < 0.60,
+      hasChimney: Math.random() < 0.55,
+      bushes: randi(1,3),
     };
   }
 
+  function setRoofPatternColor(baseColor){
+    // Rebuild shingle pattern tinted to roof color (cheap + effective)
+    shinglePattern = makePattern((g,w,h)=>{
+      g.fillStyle = baseColor;
+      g.fillRect(0,0,w,h);
+
+      // shingles lines
+      g.strokeStyle = "rgba(0,0,0,0.22)";
+      g.lineWidth = 1;
+      for(let y=0;y<h;y+=10){
+        g.beginPath();
+        g.moveTo(0,y);
+        g.lineTo(w,y);
+        g.stroke();
+      }
+      g.strokeStyle = "rgba(255,255,255,0.10)";
+      for(let y=5;y<h;y+=10){
+        g.beginPath();
+        g.moveTo((y%20===5)?12:0, y);
+        g.lineTo(w, y);
+        g.stroke();
+      }
+
+      // speckle
+      for(let i=0;i<200;i++){
+        g.fillStyle = `rgba(0,0,0,${Math.random()*0.12})`;
+        g.fillRect(Math.random()*w, Math.random()*h, 1, 1);
+      }
+    }, 260, 140);
+  }
+
   function drawHouse(x, z, style){
-    const yGround = groundYAtZ(z) + 8; // sit in grass (slightly lower)
+    const yGround = groundYAtZ(z) + 10;     // anchored in grass
     const p = project(x, yGround, z);
-    const base = 250 * p.s;
-    const w = base * 0.95 * style.wMul;
-    const h = base * 0.86 * style.hMul;
+    const base = HOUSE_BASE_SIZE * p.s;
 
-    // subtle fog with distance
-    const fog = clamp(1 - (z / FAR_Z), 0, 1);
-    const shadowAlpha = 0.25 + fog * 0.25;
+    const w = base * 0.92 * style.wMul;
+    const h = base * 0.82 * style.hMul;
 
-    // ground shadow
+    // shadow
     ctx.save();
-    ctx.globalAlpha = shadowAlpha;
+    ctx.globalAlpha = 0.35;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     ctx.beginPath();
-    ctx.ellipse(p.sx, p.sy + 6*p.s, w*0.42, w*0.16, 0, 0, Math.PI*2);
+    ctx.ellipse(p.sx, p.sy + 7*p.s, w*0.44, w*0.16, 0, 0, Math.PI*2);
     ctx.fill();
     ctx.restore();
 
-    // body (SOLID)
+    // body
     ctx.fillStyle = style.body;
     roundRect(p.sx - w/2, p.sy - h, w, h, 14 * p.s);
     ctx.fill();
 
-    // trim
+    // subtle body texture (tiny speckle)
+    ctx.save();
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = "rgba(0,0,0,1)";
+    for(let i=0;i<10;i++){
+      ctx.fillRect(p.sx - w/2 + Math.random()*w, p.sy - h + Math.random()*h, 1, 1);
+    }
+    ctx.restore();
+
+    // outline
     ctx.lineWidth = Math.max(1.2, 2.1 * p.s);
     ctx.strokeStyle = "rgba(0,0,0,0.28)";
     ctx.stroke();
 
-    // roof
-    ctx.fillStyle = style.roof;
+    // roof shingles
+    setRoofPatternColor(style.roof);
+    ctx.fillStyle = shinglePattern || style.roof;
+
     if(style.roofType === 0){
       ctx.beginPath();
       ctx.moveTo(p.sx - w/2, p.sy - h);
-      ctx.lineTo(p.sx, p.sy - h - h*0.46);
+      ctx.lineTo(p.sx, p.sy - h - h*0.48);
       ctx.lineTo(p.sx + w/2, p.sy - h);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.stroke();
     } else if(style.roofType === 1){
-      roundRect(p.sx - w*0.58, p.sy - h - h*0.18, w*1.16, h*0.18, 10*p.s);
+      roundRect(p.sx - w*0.60, p.sy - h - h*0.18, w*1.20, h*0.18, 10*p.s);
       ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.stroke();
     } else {
       ctx.beginPath();
       ctx.moveTo(p.sx - w/2, p.sy - h);
-      ctx.lineTo(p.sx, p.sy - h - h*0.62);
+      ctx.lineTo(p.sx, p.sy - h - h*0.64);
       ctx.lineTo(p.sx + w/2, p.sy - h);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.stroke();
     }
 
-    // chimney (solid)
+    // chimney
     if(style.hasChimney){
       ctx.fillStyle = "#2b2f3c";
       roundRect(p.sx + w*0.22, p.sy - h - h*0.30, w*0.12, h*0.22, 8*p.s);
@@ -353,18 +517,21 @@
     // porch
     if(style.hasPorch){
       ctx.fillStyle = style.accent;
-      roundRect(p.sx - w*0.32, p.sy - h*0.10, w*0.64, h*0.12, 10*p.s);
+      roundRect(p.sx - w*0.34, p.sy - h*0.10, w*0.68, h*0.12, 10*p.s);
       ctx.fill();
     }
 
-    // door
+    // door + knob
     ctx.fillStyle = style.door;
-    const dw = w*0.18, dh = h*0.30;
+    const dw = w*0.20, dh = h*0.32;
     roundRect(p.sx - dw/2, p.sy - dh, dw, dh, 8*p.s);
     ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath();
+    ctx.ellipse(p.sx + dw*0.20, p.sy - dh*0.52, 2.4*p.s, 2.4*p.s, 0, 0, Math.PI*2);
+    ctx.fill();
 
-    // windows (solid)
-    ctx.fillStyle = style.win;
+    // windows with sills and frames
     const rows = style.floors + 1;
     const cols = style.winCols + 1;
     const padX = w*0.10;
@@ -375,29 +542,98 @@
     for(let r=0;r<rows;r++){
       for(let c=0;c<cols;c++){
         if(r === rows-1 && Math.abs(c - (cols/2)) < 0.6) continue;
+
         const wx = (p.sx - w/2) + padX + c*cellW + cellW*0.18;
         const wy = (p.sy - h) + padY + r*cellH + cellH*0.18;
-        roundRect(wx, wy, cellW*0.64, cellH*0.58, 7*p.s);
+        const ww = cellW*0.64;
+        const wh = cellH*0.58;
+
+        // frame
+        ctx.fillStyle = style.trim;
+        roundRect(wx - 2*p.s, wy - 2*p.s, ww + 4*p.s, wh + 4*p.s, 7*p.s);
+        ctx.fill();
+
+        // window glass
+        ctx.fillStyle = style.win;
+        roundRect(wx, wy, ww, wh, 6*p.s);
+        ctx.fill();
+
+        // sill
+        ctx.fillStyle = "rgba(0,0,0,0.18)";
+        roundRect(wx - 2*p.s, wy + wh + 2*p.s, ww + 4*p.s, 5*p.s, 3*p.s);
+        ctx.fill();
+
+        // crossbars
+        ctx.save();
+        ctx.globalAlpha = 0.30;
+        ctx.strokeStyle = "rgba(255,255,255,0.8)";
+        ctx.lineWidth = Math.max(1, 1.2*p.s);
+        ctx.beginPath();
+        ctx.moveTo(wx + ww/2, wy);
+        ctx.lineTo(wx + ww/2, wy + wh);
+        ctx.moveTo(wx, wy + wh/2);
+        ctx.lineTo(wx + ww, wy + wh/2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // landscaping: bushes + tiny flowers
+    const bushBaseY = p.sy + 3*p.s;
+    for(let i=0;i<style.bushes;i++){
+      const bx = p.sx + (i - (style.bushes-1)/2) * (w*0.22);
+      const br = (10 + Math.random()*10) * p.s;
+      ctx.fillStyle = "#2f7a44";
+      ctx.beginPath();
+      ctx.ellipse(bx, bushBaseY - br*0.4, br*1.2, br, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // highlight
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "#b9ffb3";
+      ctx.beginPath();
+      ctx.ellipse(bx - br*0.2, bushBaseY - br*0.7, br*0.7, br*0.5, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // flower dots
+      ctx.fillStyle = ["#ff6b6b","#ffe9a6","#ff8fb3","#ffffff"][randi(0,3)];
+      for(let f=0; f<2; f++){
+        ctx.beginPath();
+        ctx.ellipse(bx + (Math.random()*2-1)*br*0.4, bushBaseY - br*0.5 + (Math.random()*2-1)*br*0.3, 1.5*p.s, 1.5*p.s, 0, 0, Math.PI*2);
         ctx.fill();
       }
     }
   }
 
-  // ========= Lamp drawing =========
+  // ========= Lamp =========
   function drawLamp(x, z, hWorld){
-    const yGround = groundYAtZ(z) + 2;
+    const yGround = groundYAtZ(z) + 3;
     const p = project(x, yGround, z);
 
-    const poleW = Math.max(2, 9.5 * p.s);
+    const poleW = Math.max(2, 9 * p.s);
     const poleH = hWorld * p.s;
 
+    // pole
     ctx.fillStyle = "#2a2a2a";
     roundRect(p.sx - poleW/2, p.sy - poleH, poleW, poleH, 10*p.s);
     ctx.fill();
 
+    // head
     ctx.fillStyle = "#1a1a1a";
     roundRect(p.sx - poleW*1.9, p.sy - poleH - 18*p.s, poleW*3.8, 18*p.s, 8*p.s);
     ctx.fill();
+
+    // subtle metal texture
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = "rgba(255,255,255,0.6)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(p.sx - poleW/2, p.sy - poleH + poleH*0.15);
+    ctx.lineTo(p.sx + poleW/2, p.sy - poleH + poleH*0.15);
+    ctx.stroke();
+    ctx.restore();
 
     // glow
     const g = ctx.createRadialGradient(p.sx, p.sy - poleH, 2, p.sx, p.sy - poleH, 95*p.s);
@@ -409,7 +645,7 @@
     ctx.fill();
   }
 
-  // ========= Build pools with EVEN spacing (prevents clutter + makes loop seamless) =========
+  // ========= Pools with EVEN spacing (seamless) =========
   function buildEvenZPool(count, gap, startZ){
     const arr = [];
     let z = startZ;
@@ -420,28 +656,31 @@
     return arr;
   }
 
-  // Houses: two streams, left/right, staggered in Z for nicer rhythm
   const housePool = [];
-  const baseHouseZ = buildEvenZPool(HOUSE_COUNT, HOUSE_Z_GAP, 320);
-
+  const baseHouseZ = buildEvenZPool(HOUSE_COUNT, HOUSE_Z_GAP, 420);
   for(let i=0;i<baseHouseZ.length;i++){
     const z = baseHouseZ[i];
-    const side = (i % 2 === 0) ? -1 : 1;            // alternate sides
-    const lane = rand(0.55, 1.05);                  // further into grass
-    const style = makeHouseStyle();
-    housePool.push({ z, side, lane, style });
+    const side = (i % 2 === 0) ? -1 : 1;
+    const lane = rand(0.70, 1.25);  // deeper into grass, bigger “sides”
+    housePool.push({ z, side, lane, style: makeHouseStyle() });
   }
 
-  // Lamps: evenly spaced, alternating sides
   const lampPool = [];
-  const baseLampZ = buildEvenZPool(LAMP_COUNT, LAMP_Z_GAP, 520);
+  const baseLampZ = buildEvenZPool(LAMP_COUNT, LAMP_Z_GAP, 620);
   for(let i=0;i<baseLampZ.length;i++){
     lampPool.push({
       z: baseLampZ[i],
       side: (i % 2 === 0) ? -1 : 1,
-      lane: rand(0.10, 0.28),
-      h: rand(290, 360)
+      lane: rand(0.14, 0.32),
+      h: rand(310, 390),
     });
+  }
+
+  function worldXAt(z, t, side, lane, extra){
+    const cx = roadCenterX(z, t);
+    const halfRoad = halfRoadAtZ(z);
+    const off = halfRoad + SIDEWALK_W + extra + lane * 320;
+    return cx + side * off;
   }
 
   // ========= Scroll -> distance =========
@@ -454,60 +693,42 @@
     const total = section.offsetHeight - viewH;
     const scrolled = -rect.top;
     const p = total > 0 ? clamp(scrolled / total, 0, 1) : 0;
-    targetDist = p * 260000;
+    targetDist = p * 280000;
   }
 
-  function wrapZ(z){
-    // Wrap into [0, SPAN_Z)
-    z = z % SPAN_Z;
-    if(z < 0) z += SPAN_Z;
-    return z;
-  }
-
-  function worldXAt(z, t, side, lane, extra){
-    const cx = roadCenterX(z, t);
-    const halfRoad = halfRoadAtZ(z);
-    const off = halfRoad + SIDEWALK_W + extra + lane * 260;
-    return cx + side * off;
-  }
-
+  // ========= Render loop =========
   function tick(){
     requestAnimationFrame(tick);
 
     computeScrollDist();
     dist += (targetDist - dist) * 0.085;
 
-    // This is the key: camera progress wraps on EXACT span -> seamless
     const t = dist;
     const camZ = wrapZ(t * SPEED);
 
     drawSky(t);
     drawWorldBands(t);
 
-    // Collect drawables far->near for overlap
     const drawables = [];
 
-    // Houses (stable density)
+    // houses
     for(const h of housePool){
-      // Relative z in front of camera, wrapped
       let z = wrapZ(h.z - camZ);
-      // Put objects behind camera to far distance seamlessly
       if(z < NEAR_Z) z += SPAN_Z;
 
-      const x = worldXAt(z, t, h.side, h.lane, 170);
+      const x = worldXAt(z, t, h.side, h.lane, 220);
       drawables.push({ z, kind:"house", x, style:h.style });
     }
 
-    // Lamps
+    // lamps
     for(const l of lampPool){
       let z = wrapZ(l.z - camZ);
       if(z < NEAR_Z) z += SPAN_Z;
 
-      const x = worldXAt(z, t, l.side, l.lane, 40);
+      const x = worldXAt(z, t, l.side, l.lane, 60);
       drawables.push({ z, kind:"lamp", x, h:l.h });
     }
 
-    // Sort far -> near
     drawables.sort((a,b)=> b.z - a.z);
 
     for(const d of drawables){
@@ -515,27 +736,28 @@
       else drawHouse(d.x, d.z, d.style);
     }
 
-    // Aesthetic finishing: vignette + slight color wash
+    // finishing: vignette + warm wash
     const w = canvas.clientWidth, h = canvas.clientHeight;
-
-    // vignette
-    const vg = ctx.createRadialGradient(w*0.5, h*0.62, 60, w*0.5, h*0.62, Math.max(w,h)*0.86);
+    const vg = ctx.createRadialGradient(w*0.5, h*0.65, 60, w*0.5, h*0.65, Math.max(w,h)*0.90);
     vg.addColorStop(0, "rgba(0,0,0,0)");
-    vg.addColorStop(1, "rgba(0,0,0,0.35)");
+    vg.addColorStop(1, "rgba(0,0,0,0.32)");
     ctx.fillStyle = vg;
     ctx.fillRect(0,0,w,h);
 
-    // subtle warm wash
     ctx.save();
-    ctx.globalAlpha = 0.06;
+    ctx.globalAlpha = 0.05;
     ctx.fillStyle = "#ffd9b3";
     ctx.fillRect(0,0,w,h);
     ctx.restore();
   }
 
+  // init
+  buildPatterns();
+  resize();
   tick();
 })();
 </script>
 </body>
 </html>
+
 
