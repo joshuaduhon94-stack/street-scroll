@@ -3,29 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Infinite Cartoon Street (Scroll Forward)</title>
+  <title>Infinite Cartoon Street (Seamless)</title>
   <style>
     html,body{margin:0;height:100%;background:#0b0d12;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    .spacerTop,.spacerBottom{max-width:900px;margin:0 auto;padding:48px 18px;opacity:.92}
+    .spacerTop,.spacerBottom{max-width:900px;margin:0 auto;padding:46px 18px;opacity:.92}
     .spacerTop h1{margin:0 0 10px 0;font-size:clamp(26px,5vw,44px);letter-spacing:-.02em}
     .spacerTop p,.spacerBottom p{margin:0;line-height:1.45;opacity:.85}
-
-    /* Long scroll runway (practically infinite). */
     .scrollSection{height:120000px; position:relative;}
-
-    /* Sticky viewport canvas */
-    .stage{
-      position:sticky; top:0;
-      height:100svh; width:100%;
-      overflow:hidden; background:#070a10;
-    }
-
+    .stage{position:sticky; top:0; height:100svh; width:100%; overflow:hidden; background:#070a10;}
     canvas{display:block;width:100%;height:100%}
     .hud{
       position:absolute; left:50%; top:12px; transform:translateX(-50%);
-      width:min(92vw,820px);
+      width:min(92vw,900px);
       padding:10px 12px; border-radius:14px;
-      background:rgba(0,0,0,.35);
+      background:rgba(0,0,0,.30);
       backdrop-filter:blur(10px);
       -webkit-backdrop-filter:blur(10px);
       box-shadow:0 18px 60px rgba(0,0,0,.45);
@@ -39,17 +30,17 @@
 <body>
 
   <div class="spacerTop">
-    <h1>Infinite Cartoon Street (Scroll Forward)</h1>
-    <p>Scroll down. The street curves, sidewalks and grass appear, lamps pass by, and houses recycle so it feels endless.</p>
+    <h1>Infinite Cartoon Street (Seamless)</h1>
+    <p>Scroll down. Seamless loop, spaced houses and lamps, wider grass, higher sky, stronger horizon perspective.</p>
   </div>
 
   <section class="scrollSection" id="scrollSection">
-    <div class="stage" id="stage">
+    <div class="stage">
       <canvas id="c"></canvas>
       <div class="hud">
-        <div class="k">2.5D • Canvas • Recycling</div>
+        <div class="k">Seamless Loop • Clean Spacing • Mobile-first</div>
         <h2 class="t">Scroll to move forward</h2>
-        <p class="s">Next: swap the simple drawn houses for AI-made cartoon house images.</p>
+        <p class="s">Next: swap drawn houses for AI PNG sprites for a premium cartoon look.</p>
       </div>
     </div>
   </section>
@@ -74,28 +65,36 @@
   window.addEventListener("resize", resize);
   resize();
 
-  // ====== TUNING KNOBS ======
-  const FAR_Z = 3200;
-  const NEAR_Z = 70;
+  // ========= Art-directed tuning =========
+  const FAR_Z = 5200;             // farther world -> tighter horizon depth
+  const NEAR_Z = 120;             // when objects pass near this, recycle
+  const SPAN_Z = FAR_Z;           // seamless loop span (exact repeat length)
 
-  const HOUSE_COUNT = 22;        // fewer houses
-  const HOUSE_Z_GAP = 240;       // more spacing (increase for wider gaps)
-  const HOUSE_Z_JITTER = 70;     // random spacing variance
+  const SPEED = 1.85;             // forward speed
+  const CURVE = 0.00045;          // gentle road curve
+  const ROAD_W = 520;             // road half-width base
+  const HORIZON = 0.22;           // higher sky (smaller value = higher horizon line)
+  const CAMERA_Y = 170;           // camera height
 
-  const SPEED = 2.25;
-  const CURVE = 0.00055;
-  const ROAD_W = 520;
-  const CAMERA_Y = 130;
-  const HORIZON = 0.30;
+  const GROUND_Y = 520;           // push "ground plane" lower -> grass fills bottom half
+  const SIDEWALK_W = 140;
+  const GRASS_W = 820;            // MUCH wider grass
+  const ROAD_TAPER = 0.86;        // stronger convergence (higher taper)
 
-  const SIDEWALK_W = 110;        // world units
-  const GRASS_W = 420;           // extra band beyond sidewalk
-  const LAMP_COUNT = 14;
-  const LAMP_Z_GAP = 260;
+  // Spacing controls (no clutter)
+  const HOUSE_COUNT = 18;
+  const HOUSE_Z_GAP = 340;        // bigger gaps = less clutter
+  const LAMP_COUNT  = 14;
+  const LAMP_Z_GAP  = 520;        // spaced out lamps
 
-  // ====== Projection ======
+  // ========= Math helpers =========
+  const clamp = (n,a,b)=>Math.max(a,Math.min(b,n));
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const randi = (a,b)=>Math.floor(rand(a,b+1));
+
   function project(x, y, z){
-    const fov = 430;
+    // slightly narrower fov -> stronger depth feel
+    const fov = 380;
     const scale = fov / (fov + z);
     const cx = canvas.clientWidth * 0.5;
     const cy = canvas.clientHeight * HORIZON;
@@ -103,51 +102,70 @@
   }
 
   function roadCenterX(z, t){
-    return Math.sin((t * 0.002) + z * CURVE) * 220;
+    // very smooth curve
+    return Math.sin((t * 0.0016) + z * CURVE) * 220;
   }
 
-  function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
-  function rand(a,b){ return a + Math.random()*(b-a); }
-  function randi(a,b){ return Math.floor(rand(a,b+1)); }
+  function halfRoadAtZ(z){
+    // stronger taper with distance => tighter vanishing point
+    const p = (z / FAR_Z);
+    return ROAD_W * (1 - Math.pow(p, 0.78) * ROAD_TAPER);
+  }
 
-  // ====== Sky + Clouds ======
-  const clouds = Array.from({length: 10}, () => ({
-    x: rand(-520, 520),
-    y: rand(-40, 140),
-    z: rand(900, 3200),
-    w: rand(220, 520),
-    h: rand(70, 160),
-    speed: rand(0.2, 0.7),
+  // Ground height function (slight rise in distance for nicer composition)
+  function groundYAtZ(z){
+    // As z increases, ground rises a bit toward horizon
+    return GROUND_Y - (z / FAR_Z) * 55;
+  }
+
+  // ========= Sky / Clouds / Sun haze =========
+  const clouds = Array.from({length: 12}, () => ({
+    x: rand(-760, 760),
+    y: rand(-40, 170),
+    z: rand(900, FAR_Z),
+    w: rand(240, 580),
+    h: rand(70, 190),
+    speed: rand(0.15, 0.55),
   }));
 
   function drawSky(t){
     const w = canvas.clientWidth, h = canvas.clientHeight;
+
+    // soft, pleasing sky gradient
     const g = ctx.createLinearGradient(0,0,0,h);
-    g.addColorStop(0, "#78b8ff");
-    g.addColorStop(0.55, "#cfe9ff");
-    g.addColorStop(1, "#e9f6ff");
+    g.addColorStop(0, "#78b9ff");
+    g.addColorStop(0.35, "#bfe5ff");
+    g.addColorStop(0.72, "#eaf6ff");
+    g.addColorStop(1, "#f7fbff");
     ctx.fillStyle = g;
     ctx.fillRect(0,0,w,h);
 
-    // Clouds (solid, simple)
+    // subtle sun haze (top right)
+    const sun = ctx.createRadialGradient(w*0.78, h*0.18, 20, w*0.78, h*0.18, Math.max(w,h)*0.55);
+    sun.addColorStop(0, "rgba(255,250,220,0.75)");
+    sun.addColorStop(1, "rgba(255,250,220,0)");
+    ctx.fillStyle = sun;
+    ctx.fillRect(0,0,w,h);
+
+    // clouds
     ctx.save();
     ctx.fillStyle = "#ffffff";
     for(const c of clouds){
-      const drift = Math.sin((t*0.001*c.speed) + c.z*0.002) * 40;
+      const drift = Math.sin((t*0.001*c.speed) + c.z*0.0018) * 55;
       const p = project(c.x + drift, c.y, c.z);
       const ww = c.w * p.s;
       const hh = c.h * p.s;
 
       ctx.beginPath();
-      ctx.ellipse(p.sx, p.sy, ww*0.40, hh*0.32, 0, 0, Math.PI*2);
-      ctx.ellipse(p.sx - ww*0.22, p.sy + hh*0.05, ww*0.32, hh*0.26, 0, 0, Math.PI*2);
-      ctx.ellipse(p.sx + ww*0.24, p.sy + hh*0.06, ww*0.36, hh*0.28, 0, 0, Math.PI*2);
+      ctx.ellipse(p.sx, p.sy, ww*0.44, hh*0.34, 0, 0, Math.PI*2);
+      ctx.ellipse(p.sx - ww*0.26, p.sy + hh*0.06, ww*0.34, hh*0.26, 0, 0, Math.PI*2);
+      ctx.ellipse(p.sx + ww*0.28, p.sy + hh*0.08, ww*0.38, hh*0.28, 0, 0, Math.PI*2);
       ctx.fill();
     }
     ctx.restore();
   }
 
-  // ====== Road + Sidewalk + Grass ======
+  // ========= Bands (grass, sidewalk, road) =========
   function polygonBand(getLeftRightAtZ, zMax, steps, fillStyle){
     ctx.beginPath();
     for(let i=0;i<=steps;i++){
@@ -169,52 +187,78 @@
   }
 
   function drawWorldBands(t){
-    const steps = 78;
+    const steps = 90;
 
-    // Grass outer
+    // Grass (outer) – richer color
     polygonBand((z) => {
       const cx = roadCenterX(z, t);
-      const halfRoad = ROAD_W * (1 - (z / FAR_Z) * 0.78);
+      const halfRoad = halfRoadAtZ(z);
+      const y = groundYAtZ(z) + 6;
       const lx = cx - (halfRoad + SIDEWALK_W + GRASS_W);
       const rx = cx + (halfRoad + SIDEWALK_W + GRASS_W);
-      return { lx, rx, y: 430 };
-    }, FAR_Z, steps, "#58b957");
+      return { lx, rx, y };
+    }, FAR_Z, steps, "#4fbf63");
 
-    // Sidewalk
+    // subtle grass texture lines
+    ctx.save();
+    ctx.globalAlpha = 0.10;
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 1;
+    for(let i=0;i<24;i++){
+      const y = canvas.clientHeight*(0.55 + i*0.02);
+      ctx.beginPath();
+      ctx.moveTo(0,y);
+      ctx.lineTo(canvas.clientWidth,y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Sidewalk (slightly warm gray)
     polygonBand((z) => {
       const cx = roadCenterX(z, t);
-      const halfRoad = ROAD_W * (1 - (z / FAR_Z) * 0.78);
+      const halfRoad = halfRoadAtZ(z);
+      const y = groundYAtZ(z) + 2;
       const lx = cx - (halfRoad + SIDEWALK_W);
       const rx = cx + (halfRoad + SIDEWALK_W);
-      return { lx, rx, y: 425 };
-    }, FAR_Z, steps, "#d7d7d7");
+      return { lx, rx, y };
+    }, FAR_Z, steps, "#e0ddd6");
 
     // Road
     polygonBand((z) => {
       const cx = roadCenterX(z, t);
-      const halfRoad = ROAD_W * (1 - (z / FAR_Z) * 0.78);
-      return { lx: cx - halfRoad, rx: cx + halfRoad, y: 420 };
-    }, FAR_Z, steps, "#2b2f3b");
+      const halfRoad = halfRoadAtZ(z);
+      const y = groundYAtZ(z);
+      return { lx: cx - halfRoad, rx: cx + halfRoad, y };
+    }, FAR_Z, steps, "#2a2f3c");
 
-    // Center dashed line
+    // center line
     ctx.save();
-    ctx.globalAlpha = 0.75;
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 3;
-    ctx.setLineDash([16, 18]);
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2.6;
+    ctx.setLineDash([18, 22]);
     ctx.beginPath();
     for(let i=0;i<=steps;i++){
       const z = (i/steps) * FAR_Z;
       const cx = roadCenterX(z, t);
-      const p = project(cx, 420, z);
+      const p = project(cx, groundYAtZ(z), z);
       if(i===0) ctx.moveTo(p.sx, p.sy);
       else ctx.lineTo(p.sx, p.sy);
     }
     ctx.stroke();
     ctx.restore();
+
+    // atmospheric haze near horizon (aesthetic x10)
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    const hz = h * HORIZON;
+    const haze = ctx.createLinearGradient(0, hz - 40, 0, hz + 260);
+    haze.addColorStop(0, "rgba(255,255,255,0.20)");
+    haze.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = haze;
+    ctx.fillRect(0, hz - 40, w, 320);
   }
 
-  // ====== Houses (solid, unique, spaced) ======
+  // ========= House drawing (solid, varied) =========
   function roundRect(x,y,w,h,r){
     const rr = Math.min(r, w/2, h/2);
     ctx.beginPath();
@@ -227,68 +271,99 @@
   }
 
   function makeHouseStyle(){
-    const bodyPalette = ["#ffd86b","#8fe3ff","#ffb3c7","#b9ffb3","#e7c0ff","#ffc38c"];
-    const roofPalette = ["#ff6b6b","#ff8fb3","#7a5cff","#2f3c55","#ff9b42","#3e5a2a"];
-    const trimPalette = ["#ffffff","#2b2f3b","#ffe9a6","#f6f6f6","#1b1f2a"];
+    // nicer, cohesive palette
+    const body = ["#ffd38a","#a7e7ff","#ffc0d3","#c7f2c7","#e6c8ff","#ffcfad","#fff2a8"];
+    const roof = ["#ff6b6b","#ff8fb3","#6b7bff","#2f3c55","#ff9b42","#3c6b4a","#5b3a2a"];
+    const trim = ["#ffffff","#2b2f3b","#fff1cc","#f7f7f7","#1b1f2a"];
     return {
-      body: bodyPalette[randi(0, bodyPalette.length-1)],
-      roof: roofPalette[randi(0, roofPalette.length-1)],
-      trim: trimPalette[randi(0, trimPalette.length-1)],
-      win:  "#1a2233",
-      door: ["#7b4b2a","#2f3c55","#5a2a2a"][randi(0,2)],
+      body: body[randi(0, body.length-1)],
+      roof: roof[randi(0, roof.length-1)],
+      trim: trim[randi(0, trim.length-1)],
+      win:  "#192234",
+      door: ["#7b4b2a","#2f3c55","#5a2a2a","#2a5a3b"][randi(0,3)],
       floors: randi(1,2),
       roofType: randi(0,2),
-      wMul: rand(0.85, 1.25),
-      hMul: rand(0.85, 1.35),
+      wMul: rand(0.90, 1.20),
+      hMul: rand(0.90, 1.28),
       winCols: randi(1,2),
+      accent: ["#ffffff","#ffe9a6","#dff6ff","#ffd6e6"][randi(0,3)],
+      hasPorch: Math.random() < 0.55,
+      hasChimney: Math.random() < 0.50,
     };
   }
 
-  function drawHouse(x, baseY, z, style){
-    const p = project(x, baseY, z);
-    const base = 240 * p.s;
-
+  function drawHouse(x, z, style){
+    const yGround = groundYAtZ(z) + 8; // sit in grass (slightly lower)
+    const p = project(x, yGround, z);
+    const base = 250 * p.s;
     const w = base * 0.95 * style.wMul;
-    const h = base * 0.85 * style.hMul;
+    const h = base * 0.86 * style.hMul;
 
-    // Body (solid)
+    // subtle fog with distance
+    const fog = clamp(1 - (z / FAR_Z), 0, 1);
+    const shadowAlpha = 0.25 + fog * 0.25;
+
+    // ground shadow
+    ctx.save();
+    ctx.globalAlpha = shadowAlpha;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.beginPath();
+    ctx.ellipse(p.sx, p.sy + 6*p.s, w*0.42, w*0.16, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // body (SOLID)
     ctx.fillStyle = style.body;
-    roundRect(p.sx - w/2, p.sy - h, w, h, 12 * p.s);
+    roundRect(p.sx - w/2, p.sy - h, w, h, 14 * p.s);
     ctx.fill();
 
-    // Outline
-    ctx.lineWidth = Math.max(1.2, 2.2 * p.s);
-    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    // trim
+    ctx.lineWidth = Math.max(1.2, 2.1 * p.s);
+    ctx.strokeStyle = "rgba(0,0,0,0.28)";
     ctx.stroke();
 
-    // Roof
+    // roof
     ctx.fillStyle = style.roof;
     if(style.roofType === 0){
       ctx.beginPath();
       ctx.moveTo(p.sx - w/2, p.sy - h);
-      ctx.lineTo(p.sx, p.sy - h - h*0.45);
+      ctx.lineTo(p.sx, p.sy - h - h*0.46);
       ctx.lineTo(p.sx + w/2, p.sy - h);
       ctx.closePath();
       ctx.fill();
     } else if(style.roofType === 1){
-      roundRect(p.sx - w*0.55, p.sy - h - h*0.18, w*1.10, h*0.18, 10*p.s);
+      roundRect(p.sx - w*0.58, p.sy - h - h*0.18, w*1.16, h*0.18, 10*p.s);
       ctx.fill();
     } else {
       ctx.beginPath();
       ctx.moveTo(p.sx - w/2, p.sy - h);
-      ctx.lineTo(p.sx, p.sy - h - h*0.60);
+      ctx.lineTo(p.sx, p.sy - h - h*0.62);
       ctx.lineTo(p.sx + w/2, p.sy - h);
       ctx.closePath();
       ctx.fill();
     }
 
-    // Door
+    // chimney (solid)
+    if(style.hasChimney){
+      ctx.fillStyle = "#2b2f3c";
+      roundRect(p.sx + w*0.22, p.sy - h - h*0.30, w*0.12, h*0.22, 8*p.s);
+      ctx.fill();
+    }
+
+    // porch
+    if(style.hasPorch){
+      ctx.fillStyle = style.accent;
+      roundRect(p.sx - w*0.32, p.sy - h*0.10, w*0.64, h*0.12, 10*p.s);
+      ctx.fill();
+    }
+
+    // door
     ctx.fillStyle = style.door;
     const dw = w*0.18, dh = h*0.30;
     roundRect(p.sx - dw/2, p.sy - dh, dw, dh, 8*p.s);
     ctx.fill();
 
-    // Windows
+    // windows (solid)
     ctx.fillStyle = style.win;
     const rows = style.floors + 1;
     const cols = style.winCols + 1;
@@ -308,10 +383,12 @@
     }
   }
 
-  // ====== Lamps ======
-  function drawLamp(x, baseY, z, hWorld){
-    const p = project(x, baseY, z);
-    const poleW = Math.max(2, 10 * p.s);
+  // ========= Lamp drawing =========
+  function drawLamp(x, z, hWorld){
+    const yGround = groundYAtZ(z) + 2;
+    const p = project(x, yGround, z);
+
+    const poleW = Math.max(2, 9.5 * p.s);
     const poleH = hWorld * p.s;
 
     ctx.fillStyle = "#2a2a2a";
@@ -319,47 +396,55 @@
     ctx.fill();
 
     ctx.fillStyle = "#1a1a1a";
-    roundRect(p.sx - poleW*1.8, p.sy - poleH - 18*p.s, poleW*3.6, 18*p.s, 8*p.s);
+    roundRect(p.sx - poleW*1.9, p.sy - poleH - 18*p.s, poleW*3.8, 18*p.s, 8*p.s);
     ctx.fill();
 
-    // Glow
-    const g = ctx.createRadialGradient(p.sx, p.sy - poleH, 2, p.sx, p.sy - poleH, 90*p.s);
-    g.addColorStop(0, "rgba(255,240,190,0.9)");
+    // glow
+    const g = ctx.createRadialGradient(p.sx, p.sy - poleH, 2, p.sx, p.sy - poleH, 95*p.s);
+    g.addColorStop(0, "rgba(255,240,190,0.92)");
     g.addColorStop(1, "rgba(255,240,190,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.ellipse(p.sx, p.sy - poleH + 10*p.s, 85*p.s, 55*p.s, 0, 0, Math.PI*2);
+    ctx.ellipse(p.sx, p.sy - poleH + 10*p.s, 88*p.s, 56*p.s, 0, 0, Math.PI*2);
     ctx.fill();
   }
 
-  // ====== Pools with spacing ======
-  const houses = [];
-  let zCursor = 140;
-  for(let i=0;i<HOUSE_COUNT;i++){
-    houses.push({
-      z: zCursor,
+  // ========= Build pools with EVEN spacing (prevents clutter + makes loop seamless) =========
+  function buildEvenZPool(count, gap, startZ){
+    const arr = [];
+    let z = startZ;
+    for(let i=0;i<count;i++){
+      arr.push(z);
+      z += gap;
+    }
+    return arr;
+  }
+
+  // Houses: two streams, left/right, staggered in Z for nicer rhythm
+  const housePool = [];
+  const baseHouseZ = buildEvenZPool(HOUSE_COUNT, HOUSE_Z_GAP, 320);
+
+  for(let i=0;i<baseHouseZ.length;i++){
+    const z = baseHouseZ[i];
+    const side = (i % 2 === 0) ? -1 : 1;            // alternate sides
+    const lane = rand(0.55, 1.05);                  // further into grass
+    const style = makeHouseStyle();
+    housePool.push({ z, side, lane, style });
+  }
+
+  // Lamps: evenly spaced, alternating sides
+  const lampPool = [];
+  const baseLampZ = buildEvenZPool(LAMP_COUNT, LAMP_Z_GAP, 520);
+  for(let i=0;i<baseLampZ.length;i++){
+    lampPool.push({
+      z: baseLampZ[i],
       side: (i % 2 === 0) ? -1 : 1,
-      lane: rand(0.35, 0.95),
-      y: 250 + rand(-10, 70),
-      style: makeHouseStyle(),
+      lane: rand(0.10, 0.28),
+      h: rand(290, 360)
     });
-    zCursor += HOUSE_Z_GAP + rand(-HOUSE_Z_JITTER, HOUSE_Z_JITTER);
   }
 
-  const lamps = [];
-  let lz = 220;
-  for(let i=0;i<LAMP_COUNT;i++){
-    lamps.push({
-      z: lz,
-      side: (i%2===0)? -1 : 1,
-      lane: rand(0.10, 0.30),
-      y: 250,
-      h: rand(260, 340),
-    });
-    lz += LAMP_Z_GAP + rand(-80, 80);
-  }
-
-  // ====== Scroll -> distance ======
+  // ========= Scroll -> distance =========
   let targetDist = 0;
   let dist = 0;
 
@@ -369,78 +454,83 @@
     const total = section.offsetHeight - viewH;
     const scrolled = -rect.top;
     const p = total > 0 ? clamp(scrolled / total, 0, 1) : 0;
-    targetDist = p * 220000;
+    targetDist = p * 260000;
+  }
+
+  function wrapZ(z){
+    // Wrap into [0, SPAN_Z)
+    z = z % SPAN_Z;
+    if(z < 0) z += SPAN_Z;
+    return z;
+  }
+
+  function worldXAt(z, t, side, lane, extra){
+    const cx = roadCenterX(z, t);
+    const halfRoad = halfRoadAtZ(z);
+    const off = halfRoad + SIDEWALK_W + extra + lane * 260;
+    return cx + side * off;
   }
 
   function tick(){
     requestAnimationFrame(tick);
+
     computeScrollDist();
     dist += (targetDist - dist) * 0.085;
 
-    const t = dist % 1000000;
-    const camZ = (t * SPEED) % FAR_Z;
+    // This is the key: camera progress wraps on EXACT span -> seamless
+    const t = dist;
+    const camZ = wrapZ(t * SPEED);
 
     drawSky(t);
     drawWorldBands(t);
 
-    // Collect drawables and sort far->near
+    // Collect drawables far->near for overlap
     const drawables = [];
 
-    for(const h of houses){
-      let z = h.z - camZ;
-      if(z < 0) z += FAR_Z;
+    // Houses (stable density)
+    for(const h of housePool){
+      // Relative z in front of camera, wrapped
+      let z = wrapZ(h.z - camZ);
+      // Put objects behind camera to far distance seamlessly
+      if(z < NEAR_Z) z += SPAN_Z;
 
-      if(z < NEAR_Z){
-        h.z = camZ + FAR_Z - (rand(260, 640));
-        h.side = (Math.random() < 0.5) ? -1 : 1;
-        h.lane = rand(0.35, 0.95);
-        h.y = 250 + rand(-10, 70);
-        h.style = makeHouseStyle();
-        z = h.z - camZ;
-      }
-
-      const center = roadCenterX(z, t);
-      const halfRoad = ROAD_W * (1 - (z / FAR_Z) * 0.78);
-      const offset = halfRoad + SIDEWALK_W + 140 + h.lane * 220;
-      const x = center + (h.side * offset);
-
-      drawables.push({ z, kind: "house", x, y: h.y, style: h.style });
+      const x = worldXAt(z, t, h.side, h.lane, 170);
+      drawables.push({ z, kind:"house", x, style:h.style });
     }
 
-    for(const l of lamps){
-      let z = l.z - camZ;
-      if(z < 0) z += FAR_Z;
+    // Lamps
+    for(const l of lampPool){
+      let z = wrapZ(l.z - camZ);
+      if(z < NEAR_Z) z += SPAN_Z;
 
-      if(z < NEAR_Z){
-        l.z = camZ + FAR_Z - (rand(260, 640));
-        l.side = (Math.random() < 0.5) ? -1 : 1;
-        l.lane = rand(0.10, 0.30);
-        l.h = rand(260, 340);
-        z = l.z - camZ;
-      }
-
-      const center = roadCenterX(z, t);
-      const halfRoad = ROAD_W * (1 - (z / FAR_Z) * 0.78);
-      const offset = halfRoad + (SIDEWALK_W * 0.55) + l.lane * 120;
-      const x = center + (l.side * offset);
-
-      drawables.push({ z, kind: "lamp", x, y: 250, h: l.h });
+      const x = worldXAt(z, t, l.side, l.lane, 40);
+      drawables.push({ z, kind:"lamp", x, h:l.h });
     }
 
+    // Sort far -> near
     drawables.sort((a,b)=> b.z - a.z);
 
     for(const d of drawables){
-      if(d.kind === "lamp") drawLamp(d.x, d.y, d.z, d.h);
-      else drawHouse(d.x, d.y, d.z, d.style);
+      if(d.kind === "lamp") drawLamp(d.x, d.z, d.h);
+      else drawHouse(d.x, d.z, d.style);
     }
 
-    // Vignette
+    // Aesthetic finishing: vignette + slight color wash
     const w = canvas.clientWidth, h = canvas.clientHeight;
-    const vg = ctx.createRadialGradient(w*0.5, h*0.62, 60, w*0.5, h*0.62, Math.max(w,h)*0.78);
+
+    // vignette
+    const vg = ctx.createRadialGradient(w*0.5, h*0.62, 60, w*0.5, h*0.62, Math.max(w,h)*0.86);
     vg.addColorStop(0, "rgba(0,0,0,0)");
     vg.addColorStop(1, "rgba(0,0,0,0.35)");
     ctx.fillStyle = vg;
     ctx.fillRect(0,0,w,h);
+
+    // subtle warm wash
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = "#ffd9b3";
+    ctx.fillRect(0,0,w,h);
+    ctx.restore();
   }
 
   tick();
@@ -448,3 +538,4 @@
 </script>
 </body>
 </html>
+
